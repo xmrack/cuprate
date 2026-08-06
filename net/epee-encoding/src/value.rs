@@ -11,7 +11,7 @@ use cuprate_hex::{Hex, HexVec};
 
 use crate::{
     io::{checked_read_primitive, checked_write_primitive},
-    max_upfront_capacity,
+    max_element_count, max_upfront_capacity,
     varint::{read_varint, write_varint},
     write_bytes, write_iterator, EpeeObject, Error, InnerMarker, Marker, Result,
     MAX_STRING_LEN_POSSIBLE,
@@ -69,6 +69,9 @@ impl<T: EpeeObject> EpeeValue for Vec<T> {
             ));
         }
         let len = read_varint(r)?;
+        if len > max_element_count::<T>() {
+            return Err(Error::Format("Sequence exceeds maximum element count"));
+        }
 
         let individual_marker = Marker::new(marker.inner_marker);
 
@@ -375,6 +378,9 @@ impl<const N: usize> EpeeValue for Vec<[u8; N]> {
         }
 
         let len = read_varint(r)?;
+        if len > max_element_count::<[u8; N]>() {
+            return Err(Error::Format("Sequence exceeds maximum element count"));
+        }
 
         let individual_marker = Marker::new(marker.inner_marker);
 
@@ -458,6 +464,9 @@ macro_rules! epee_seq {
                 }
 
                 let len = read_varint(r)?;
+                if len > max_element_count::<$val>() {
+                    return Err(Error::Format("Sequence exceeds maximum element count"));
+                }
 
                 let individual_marker = Marker::new(marker.inner_marker.clone());
 

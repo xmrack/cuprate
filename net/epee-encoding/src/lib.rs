@@ -384,3 +384,23 @@ fn advance<B: Buf>(n: usize, b: &mut B) -> Result<()> {
 const fn max_upfront_capacity<T>() -> usize {
     2_000_000 / size_of::<T>()
 }
+
+/// Memory budget (in bytes) for the fixed per-element overhead of a decoded container.
+///
+/// This is deliberately much larger than any legitimate Monero message, yet small enough to prevent
+/// a memory-amplification OOM.
+const CONTAINER_ELEMENT_MEMORY_BUDGET: usize = 128 * 1024 * 1024;
+
+/// Maximum number of elements a container (`Vec<T>`/`[T; N]`) may claim to hold.
+///
+/// A container of `N` elements of `T` occupies at least `N * size_of::<T>()` bytes in memory, yet an
+/// element can encode in as little as 1 byte (an empty byte-string, or an all-default object). Without
+/// this bound an attacker can send a small (≤ `max_packet_size`) message that claims a huge element
+/// count of a large-in-memory type (e.g. `Vec<bytes::Bytes>`, `size_of == 32`), forcing a multi-GB
+/// allocation and OOM. Capping the count bounds the container's fixed element overhead to
+/// [`CONTAINER_ELEMENT_MEMORY_BUDGET`] regardless of how small each element encodes.
+const fn max_element_count<T>() -> usize {
+    let elem = size_of::<T>();
+    // `+ 1` avoids division-by-zero for zero-sized types (which never amplify anyway).
+    CONTAINER_ELEMENT_MEMORY_BUDGET / (elem + 1)
+}
