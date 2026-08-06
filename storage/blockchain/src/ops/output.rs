@@ -1,6 +1,6 @@
 //! Output functions.
 use std::{
-    collections::HashMap,
+    collections::{hash_map::Entry, HashMap},
     ops::{AddAssign, SubAssign},
 };
 
@@ -30,23 +30,26 @@ pub fn add_output(
     w: &mut fjall::OwnedWriteBatch,
     pre_rct_numb_outputs_cache: &mut HashMap<Amount, u64>,
 ) -> DbResult<PreRctOutputId> {
-    let mut err = None;
-    let num_outputs = pre_rct_numb_outputs_cache.entry(amount).or_insert_with(|| {
-        let last_out = db.pre_rct_outputs.prefix(amount.to_be_bytes()).next_back();
+    // Only populate the cache after a *successful* DB read. Previously this used
+    // `or_insert_with`, whose closure returned `0` on a read error — and `or_insert_with` inserted
+    // that bogus `0` into the cache before the error was propagated, poisoning it: a subsequent
+    // `add_output` for the same amount would then trust the cached `0`, write `amount_index = 0`,
+    // and overwrite the existing output at index 0.
+    let num_outputs = match pre_rct_numb_outputs_cache.entry(amount) {
+        Entry::Occupied(e) => e.into_mut(),
+        Entry::Vacant(e) => {
+            let last_out = db.pre_rct_outputs.prefix(amount.to_be_bytes()).next_back();
 
-        match last_out.map(fjall::Guard::key) {
-            None => 0,
-            Some(Ok(o)) => u64::from_be_bytes(o[8..].try_into().unwrap()) + 1,
-            Some(Err(e)) => {
-                err = Some(e);
-                0
-            }
+            let count = match last_out.map(fjall::Guard::key) {
+                None => 0,
+                Some(Ok(o)) => u64::from_be_bytes(o[8..].try_into().unwrap()) + 1,
+                // Return without inserting so a transient read error never poisons the cache.
+                Some(Err(e)) => return Err(e.into()),
+            };
+
+            e.insert(count)
         }
-    });
-
-    if let Some(e) = err {
-        return Err(e.into());
-    }
+    };
 
     let pre_rct_output_id = PreRctOutputId {
         amount,
